@@ -2,110 +2,95 @@ package main
 
 import (
 	"fmt"
+	"io/fs"
+	"log"
 	"os"
+	"path/filepath"
 
+	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-type model struct {
-	choices  []string         // items on the to-do list
-	cursor   int              // which to-do list item our cursor is pointing at
-	selected map[int]struct{} // which to-do items are selected
+func main() {
+	p := tea.NewProgram(initialModel())
+
+	m, err := p.StartReturningModel()
+
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	if m, ok := m.(model); ok && m.completed {
+		d := m.codeDir.Value()
+
+		fmt.Printf("\n Starting %s... \n", d)
+
+		err := createNewDir(d)
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		fmt.Printf("Successfully initialized %s!", d)
+	}
 }
 
-func initialModel() model {
-	return model{
-		// Our shopping list is a grocery list
-		choices: []string{"Buy carrots", "Buy celery", "Buy kohlrabi"},
+func createNewDir(dirname string) error {
+	newPath := filepath.Join(repoDir, dirname)
+	err := os.MkdirAll(newPath, fs.ModePerm)
+	return err
+}
 
-		// A map which indicates which choices are selected. We're using
-		// the  map like a mathematical set. The keys refer to the indexes
-		// of the `choices` slice, above.
-		selected: make(map[int]struct{}),
+const repoDir = "/Users/acline/code"
+
+type model struct {
+	completed bool
+	codeDir   textinput.Model
+	err       error
+}
+
+type errMsg error
+type tickMsg struct{}
+
+func initialModel() model {
+	ti := textinput.New()
+	ti.Focus()
+	ti.CharLimit = 156
+	ti.Width = 20
+
+	return model{
+		completed: false,
+		codeDir:   ti,
+		err:       nil,
 	}
 }
 
 func (m model) Init() tea.Cmd {
-	// Just return `nil`, which means "no I/O right now, please."
-	return nil
+	return textinput.Blink
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	var cmd tea.Cmd
+
 	switch msg := msg.(type) {
-
-	// Is it a key press?
 	case tea.KeyMsg:
-
-		// Cool, what was the actual key pressed?
-		switch msg.String() {
-
-		// These keys should exit the program.
-		case "ctrl+c", "q":
+		switch msg.Type {
+		case tea.KeyCtrlC, tea.KeyEsc:
 			return m, tea.Quit
 
-		// The "up" and "k" keys move the cursor up
-		case "up", "k":
-			if m.cursor > 0 {
-				m.cursor--
-			}
-
-		// The "down" and "j" keys move the cursor down
-		case "down", "j":
-			if m.cursor < len(m.choices)-1 {
-				m.cursor++
-			}
-
-		// The "enter" key and the spacebar (a literal space) toggle
-		// the selected state for the item that the cursor is pointing at.
-		case "enter", " ":
-			_, ok := m.selected[m.cursor]
-			if ok {
-				delete(m.selected, m.cursor)
-			} else {
-				m.selected[m.cursor] = struct{}{}
-			}
+		case tea.KeyEnter:
+			m.completed = true
+			return m, tea.Quit
 		}
+
+	case errMsg:
+		m.err = msg
+		return m, nil
 	}
 
-	// Return the updated model to the Bubble Tea runtime for processing.
-	// Note that we're not returning a command.
-	return m, nil
+	m.codeDir, cmd = m.codeDir.Update(msg)
+	return m, cmd
 }
 
 func (m model) View() string {
-	// The header
-	s := "What should we buy at the market?\n\n"
-
-	// Iterate over our choices
-	for i, choice := range m.choices {
-
-		// Is the cursor pointing at this choice?
-		cursor := " " // no cursor
-		if m.cursor == i {
-			cursor = ">" // cursor!
-		}
-
-		// Is this choice selected?
-		checked := " " // not selected
-		if _, ok := m.selected[i]; ok {
-			checked = "x" // selected!
-		}
-
-		// Render the row
-		s += fmt.Sprintf("%s [%s] %s\n", cursor, checked, choice)
-	}
-
-	// The footer
-	s += "\nPress q to quit.\n"
-
-	// Send the UI for rendering
-	return s
-}
-
-func main() {
-	p := tea.NewProgram(initialModel())
-	if err := p.Start(); err != nil {
-		fmt.Printf("Alas, there's been an error: %v", err)
-		os.Exit(1)
-	}
+	return fmt.Sprintf("What's your project's name?\n\n%s\n\n%s", m.codeDir.View(), "(Esc to quit)\n")
 }
